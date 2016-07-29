@@ -16,7 +16,7 @@ from PIL import Image
 
 
 def my_init(shape, name=None):
-    return initializations.normal(shape, scale=1.8, name=name)
+    return initializations.normal(shape, scale=1.2, name=name)
 
 def create_grid(x_dim=32, y_dim=32, scale=1.0):
     '''
@@ -67,11 +67,22 @@ def create_image(model, x, y, r, z):
     Z = np.repeat(z, x.shape[0]).reshape((-1,x.shape[0]))
     X = np.concatenate([x, y, r, Z.T], axis=1)
 
-    img = model.predict(X)
-    img = (img - img.min()) / (img.max()-img.min()) * 255
-    img = img.reshape(y_dim, x_dim)
-    img = img.astype(np.uint8)
-    return img
+    pred = model.predict(X)
+    
+    img = []
+    for k in range(pred.shape[1]):
+        yp = pred[:, k]
+#        if k == pred.shape[1]-1:
+#            yp = np.sin(yp)
+        yp = (yp - yp.min()) / (yp.max()-yp.min())
+        img.append(yp.reshape(y_dim, x_dim))
+        
+    img = np.dstack(img)
+    if img.shape[-1] == 3:
+        from skimage.color import hsv2rgb
+        img = hsv2rgb(img)
+        
+    return (img*255).astype(np.uint8)
 
 def create_image_seq(model, x, y, r, z, n_frames=25, mode=None):
     '''
@@ -89,25 +100,28 @@ def create_image_seq(model, x, y, r, z, n_frames=25, mode=None):
 
 
 
-SINGLE_IMAGE = True
-    
-n_z = 32
-x_dim = 1280
+SINGLE_IMAGE = False
+COLORING = True
+
+n_z = 16
+x_dim = 720
 y_dim = 720
-x, y, r = create_grid(x_dim=x_dim, y_dim=y_dim, scale=10.0)
+x, y, r = create_grid(x_dim=x_dim, y_dim=y_dim, scale=5.0)
 # create latent space
-z = np.random.normal(0, 1, (5,n_z))
+z = np.random.normal(0, 1, (3,n_z))
 
 # create neural network
+n_l = 32
 model = Sequential([
-    Dense(32, init=my_init, input_dim=n_z+3),
+    Dense(n_l, init=my_init, input_dim=n_z+3),
     Activation('tanh'),
-    Dense(32, init=my_init),
+    Dense(n_l, init=my_init),
     Activation('tanh'),
-    Dense(32, init=my_init),
+    Dense(n_l, init=my_init),
     Activation('tanh'),
-    Dense(1),
-    Activation('sigmoid'),
+    Dense(3 if COLORING else 1),
+    #Activation('sigmoid'),
+    Activation('linear'),
 ])
 
 model.compile(optimizer='rmsprop', loss='mse')
@@ -121,15 +135,17 @@ if SINGLE_IMAGE:
     im = Image.fromarray(img)
     im.save('test.png')
 else:
-    img_seq = create_image_seq(model, x, y, r, z, n_frames=250, mode='smooth')
+    img_seq = create_image_seq(model, x, y, r, z, n_frames=100, mode='smooth')
     for k, img in enumerate(img_seq):
         im = Image.fromarray(img)
         im.save('seq/img_%03i.png' % k)
 
     if True:        
         from moviepy.editor import *
-        
-        tmp = [np.dstack(3*[img]).astype("uint8") for img in img_seq]
+        if COLORING:
+            tmp = img_seq
+        else:
+            tmp = [np.dstack(3*[img]).astype("uint8") for img in img_seq]
         clip = ImageSequenceClip(tmp, fps=25)
         clip.write_videofile("video.avi", fps=25, codec='libx264')
 
